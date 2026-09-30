@@ -36,6 +36,9 @@ export async function parseApiResponse(response, fallbackMessage) {
 export function publicMediaError(error, fallbackMessage) {
   const message = String(error?.message || "");
 
+  if (error?.code === 127 || error?.code === "ENOENT" || error?.code === "EACCES") {
+    return "The YouTube extraction process could not start on this server. Please try again later.";
+  }
   if (/timeout|timed out|etimedout/i.test(message)) {
     return "The video platform took too long to respond. Please try again.";
   }

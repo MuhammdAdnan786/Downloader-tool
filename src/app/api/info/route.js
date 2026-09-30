@@ -34,9 +34,11 @@ export async function POST(request) {
     return NextResponse.json(info);
   } catch (error) {
     const message = String(error?.message || "");
-    const reason = /timed out|timeout/i.test(message)
-      ? "timeout"
-      : /429|rate.?limit/i.test(message)
+    const reason = error?.code === 127 || error?.code === "ENOENT" || error?.code === "EACCES"
+      ? "extractor-process-failed"
+      : /timed out|timeout/i.test(message)
+        ? "timeout"
+        : /429|rate.?limit/i.test(message)
         ? "rate-limited"
         : /private|login required|unavailable/i.test(message)
           ? "restricted-or-unavailable"

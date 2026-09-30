@@ -99,7 +99,6 @@ let binaryPromise = null;
 
 async function findYtDlpBinary() {
   const candidates = [
-    "yt-dlp",
     path.join(
       process.cwd(),
       "node_modules",
@@ -116,15 +115,12 @@ async function findYtDlpBinary() {
           path.join(process.cwd(), "public", "bin", "yt-dlp"),
           path.join(process.cwd(), "bin", "yt-dlp"),
         ]),
+    "yt-dlp",
   ];
 
   for (const candidate of candidates) {
     try {
-      if (candidate === "yt-dlp") {
-        await execFileAsync(candidate, ["--version"]);
-        return candidate;
-      }
-      await fs.access(candidate);
+      await execFileAsync(candidate, ["--version"], { timeout: 5000 });
       return candidate;
     } catch {
       // next candidate
@@ -163,6 +159,16 @@ async function runYtDlp(attempts) {
     } catch (error) {
       lastError = error;
       const message = `${error?.stderr || ""} ${error?.message || ""}`;
+      const safeDetails = message
+        .replace(/https?:\/\/[^\s"'<>]+/gi, "[media-url]")
+        .slice(-800);
+      console.error("yt-dlp attempt failed", {
+        code: error?.code || null,
+        errno: error?.errno || null,
+        signal: error?.signal || null,
+        killed: Boolean(error?.killed),
+        details: safeDetails,
+      });
       if (!error?.killed && !RETRYABLE.test(message)) throw error;
     }
   }
