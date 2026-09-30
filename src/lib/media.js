@@ -1,10 +1,11 @@
 import ytdl from "@distube/ytdl-core";
 import { execFile } from "child_process";
-import { promises as fs } from "fs";
+import { createRequire } from "module";
 import path from "path";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
+const requireFromProject = createRequire(path.join(process.cwd(), "package.json"));
 
 const INFO_TTL = 5 * 60 * 1000; // stream URLs kaafi der valid rehte hain
 const YTDL_TIMEOUT = 20000;
@@ -98,7 +99,21 @@ async function cached(key, ttl, loader) {
 let binaryPromise = null;
 
 async function findYtDlpBinary() {
+  let packageBinary = null;
+  try {
+    const packageEntry = requireFromProject.resolve("youtube-dl-exec");
+    packageBinary = path.resolve(
+      path.dirname(packageEntry),
+      "..",
+      "bin",
+      process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"
+    );
+  } catch {
+    // Fall through to known project and PATH locations.
+  }
+
   const candidates = [
+    ...(packageBinary ? [packageBinary] : []),
     path.join(
       process.cwd(),
       "node_modules",
@@ -216,6 +231,13 @@ function getYtdlInfo(url) {
 
 // ytdl toot jaye to 60 sec tak skip karo taake har request 8 sec na latke
 async function tryYtdlInfo(url) {
+  if (
+    process.env.NETLIFY === "true" ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT
+  ) {
+    return null;
+  }
   if (Date.now() < ytdlSkipUntil) return null;
   try {
     return await getYtdlInfo(url);
