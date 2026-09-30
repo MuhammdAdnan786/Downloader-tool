@@ -10,7 +10,6 @@ import {
 } from "../../../lib/media";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(request) {
@@ -36,7 +35,7 @@ export async function POST(request) {
       );
     }
 
-    // Cache mein hota hai, isliye info route ke baad almost instant
+    // Cached hai, isliye info route ke baad ye almost instant hota hai
     const mediaInfo = await fetchMediaInfo(url);
 
     let directUrl = "";
@@ -60,7 +59,7 @@ export async function POST(request) {
         );
       }
 
-      // URL info mein ho to wahi, warna (cobalt formats) yahan generate hoga
+      // URL already info mein maujood hai, dobara extract karne ki zaroorat nahi
       directUrl = selected.url || (await getDirectDownloadUrl(url, selected.format_id));
       filename = safeFileName(mediaInfo.title, selected.ext || "mp4");
     }
@@ -68,10 +67,7 @@ export async function POST(request) {
     try {
       if (new URL(directUrl).protocol !== "https:") throw new Error("Invalid stream URL");
     } catch {
-      return NextResponse.json(
-        { error: "The platform returned an invalid video link." },
-        { status: 502 }
-      );
+      return NextResponse.json({ error: "The platform returned an invalid video link." }, { status: 502 });
     }
 
     return NextResponse.json({
