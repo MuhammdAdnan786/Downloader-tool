@@ -6,6 +6,9 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(request) {
+  const startedAt = Date.now();
+  let platform = "unknown";
+
   try {
     const parsed = await parseJsonBody(request);
     if (parsed.error) return NextResponse.json({ error: parsed.error }, { status: 400 });
@@ -16,7 +19,8 @@ export async function POST(request) {
       return NextResponse.json({ error: "Missing URL" }, { status: 400 });
     }
 
-    if (detectPlatform(url) === "unknown") {
+    platform = detectPlatform(url);
+    if (platform === "unknown") {
       return NextResponse.json(
         { error: "Unsupported URL. Please use a YouTube or Facebook link." },
         { status: 400 }
@@ -29,6 +33,27 @@ export async function POST(request) {
     }
     return NextResponse.json(info);
   } catch (error) {
+    const message = String(error?.message || "");
+    const reason = /timed out|timeout/i.test(message)
+      ? "timeout"
+      : /429|rate.?limit/i.test(message)
+        ? "rate-limited"
+        : /private|login required|unavailable/i.test(message)
+          ? "restricted-or-unavailable"
+          : /yt-dlp is not installed|not available on this server/i.test(message)
+            ? "extractor-missing"
+            : /network|socket|fetch failed|econn/i.test(message)
+              ? "network-error"
+              : "extractor-error";
+
+    console.error("Media info upstream failure", {
+      platform,
+      reason,
+      errorName: error?.name || "Error",
+      errorCode: error?.code || null,
+      durationMs: Date.now() - startedAt,
+    });
+
     return NextResponse.json(
       { error: publicMediaError(error, "Could not fetch this video. Please check the link and try again.") },
       { status: 502 }

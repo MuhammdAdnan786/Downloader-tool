@@ -7,7 +7,7 @@ import { promisify } from "util";
 const execFileAsync = promisify(execFile);
 
 const INFO_TTL = 5 * 60 * 1000; // stream URLs kaafi der valid rehte hain
-const YTDL_TIMEOUT = 12000;
+const YTDL_TIMEOUT = 20000;
 const YTDL_COOLDOWN = 10000;
 
 /* ---------------- helpers ---------------- */
@@ -204,7 +204,7 @@ let ytdlSkipUntil = 0;
 
 function getYtdlInfo(url) {
   return cached(`ytdl:${url}`, INFO_TTL, () =>
-    withTimeout(ytdl.getInfo(url, { playerClients: ["ANDROID"] }), YTDL_TIMEOUT, "ytdl")
+    withTimeout(ytdl.getInfo(url), YTDL_TIMEOUT, "ytdl")
   );
 }
 
@@ -213,7 +213,11 @@ async function tryYtdlInfo(url) {
   if (Date.now() < ytdlSkipUntil) return null;
   try {
     return await getYtdlInfo(url);
-  } catch {
+  } catch (error) {
+    console.warn("YouTube primary extractor failed", {
+      code: error?.code || null,
+      timedOut: /timed out/i.test(error?.message || ""),
+    });
     ytdlSkipUntil = Date.now() + YTDL_COOLDOWN;
     return null;
   }
