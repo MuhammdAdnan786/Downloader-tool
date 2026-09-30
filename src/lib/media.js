@@ -7,8 +7,8 @@ import { promisify } from "util";
 const execFileAsync = promisify(execFile);
 
 const INFO_TTL = 5 * 60 * 1000; // stream URLs kaafi der valid rehte hain
-const YTDL_TIMEOUT = 8000;
-const YTDL_COOLDOWN = 60 * 1000;
+const YTDL_TIMEOUT = 12000;
+const YTDL_COOLDOWN = 10000;
 
 /* ---------------- helpers ---------------- */
 
@@ -158,7 +158,7 @@ async function runYtDlp(attempts) {
     try {
       return await execFileAsync(binary, args, {
         maxBuffer: 25 * 1024 * 1024,
-        timeout: 15000,
+        timeout: 12000,
       });
     } catch (error) {
       lastError = error;
@@ -204,7 +204,7 @@ let ytdlSkipUntil = 0;
 
 function getYtdlInfo(url) {
   return cached(`ytdl:${url}`, INFO_TTL, () =>
-    withTimeout(ytdl.getInfo(url, { playerClients: ["ANDROID", "IOS"] }), YTDL_TIMEOUT, "ytdl")
+    withTimeout(ytdl.getInfo(url, { playerClients: ["ANDROID"] }), YTDL_TIMEOUT, "ytdl")
   );
 }
 
