@@ -1,57 +1,47 @@
 import "./globals.css";
+import Navbar from "./components/Navbar";
+
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.URL || "https://example.com";
 
 export const metadata = {
-  title: "Online Video Downloader - YouTube, Facebook & Audio Extractor",
-  description: "Download YouTube videos, Facebook videos, and extract audio from videos online for free. Fast, secure, and works on all devices.",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: "YouTube Video Downloader & MP4 Converter | MultiDownloader",
+    template: "%s | MultiDownloader",
+  },
+  description: "Download public YouTube and Facebook videos in available quality, or convert a video file to MP3 with our browser-based audio extractor.",
   keywords: [
     "YouTube video downloader",
-    "download YouTube videos",
-    "Facebook video downloader",
-    "download Facebook videos",
-    "online video downloader",
     "YouTube to MP4",
-    "YouTube to MP3",
-    "video to audio converter",
+    "video downloader online",
+    "Facebook video downloader",
+    "video to MP3 converter",
     "extract audio from video",
-    "free online downloader",
-    "4K video download",
-    "HD video download",
-    "audio extractor online",
-    "Facebook MP4 downloader",
-    "online audio extractor",
-    "How to download YouTube videos",
-    "How to download Facebook videos",
-    "Ho to extract audio from video",
+    "download mp4",
   ],
-  metadataBase: new URL("https://yourdomain.com"),
+  alternates: { canonical: "/" },
+  robots: { index: true, follow: true },
   openGraph: {
-    title: "Free YouTube & Facebook Video Downloader + Audio Extractor",
-    description: "Fast and free tool to download videos or extract audio from YouTube and Facebook. No signup required.",
-    url: "https://yourdomain.com",
-    siteName: "Online Video Downloader",
-    images: [
-      {
-        url: "https://yourdomain.com/og-image.jpg",
-        width: 1200,
-        height: 630,
-        alt: "Online Video Downloader",
-      },
-    ],
-    locale: "en_US",
+    title: "YouTube Video Downloader & MP4 Converter",
+    description: "Download public videos in available quality and extract MP3 audio from video files in your browser.",
+    url: siteUrl,
+    siteName: "MultiDownloader",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Free Video Downloader and Audio Extractor",
-    description: "Download YouTube, Facebook videos, or extract audio online. 100% free and fast.",
-    images: ["https://yourdomain.com/og-image.jpg"],
+    title: "YouTube Video Downloader & MP4 Converter",
+    description: "Download public videos or extract MP3 audio from a video file in your browser.",
   },
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <Navbar />
+        {children}
+      </body>
     </html>
   );
 }

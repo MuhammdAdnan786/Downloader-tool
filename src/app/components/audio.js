@@ -1,8 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { toBlobURL } from '@ffmpeg/util';
+import { useEffect, useRef, useState } from 'react';
 
 export default function AudioExtractor() {
   const [videoFile, setVideoFile] = useState(null);
@@ -11,61 +9,93 @@ export default function AudioExtractor() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [ffmpeg, setFfmpeg] = useState(null);
+  const [loadingTools, setLoadingTools] = useState(false);
+  const ffmpegRef = useRef(null);
+  const ffmpegLoadRef = useRef(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    const loadFFmpeg = async () => {
-      try {
-        setError('');
-        const ffmpegInstance = new FFmpeg();
-        
-        ffmpegInstance.on('progress', ({ progress: ratio }) => {
-          setProgress(Math.round(ratio * 100));
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (ffmpegRef.current?.loaded) ffmpegRef.current.terminate();
+    };
+  }, []);
+
+  useEffect(() => () => {
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+  }, [audioUrl]);
+
+  const loadFFmpeg = async () => {
+    if (ffmpegRef.current) return ffmpegRef.current;
+    if (!ffmpegLoadRef.current) {
+      setLoadingTools(true);
+      setError('');
+      ffmpegLoadRef.current = (async () => {
+        const [{ FFmpeg }, { toBlobURL }] = await Promise.all([
+          import('@ffmpeg/ffmpeg'),
+          import('@ffmpeg/util'),
+        ]);
+        const instance = new FFmpeg();
+        instance.on('progress', ({ progress: ratio }) => {
+          if (mountedRef.current) setProgress(Math.max(0, Math.min(100, Math.round(ratio * 100))));
         });
 
-        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-        await ffmpegInstance.load({
+        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd';
+        await instance.load({
           coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
           wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
         });
 
-        setFfmpeg(ffmpegInstance);
-      } catch (err) {
-        setError('Failed to load FFmpeg. Please try again.');
-        console.error('FFmpeg loading error:', err);
-      }
-    };
+        if (!mountedRef.current) {
+          instance.terminate();
+          throw new Error('Audio tools were closed while loading.');
+        }
 
-    loadFFmpeg();
+        ffmpegRef.current = instance;
+        setFfmpeg(instance);
+        return instance;
+      })().catch((err) => {
+        ffmpegLoadRef.current = null;
+        throw err;
+      }).finally(() => {
+        if (mountedRef.current) setLoadingTools(false);
+      });
+    }
 
-    return () => {
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-      }
-    };
-  }, [audioUrl]);
+    return ffmpegLoadRef.current;
+  };
 
   const extractAudio = async () => {
-    if (!videoFile || !ffmpeg) return;
+    if (!videoFile || loading || loadingTools) return;
+    if (videoFile.size === 0 || videoFile.size > 500 * 1024 * 1024) {
+      setError('Choose a non-empty video file smaller than 500 MB.');
+      return;
+    }
 
     try {
       setLoading(true);
       setError('');
       setProgress(0);
+      const ffmpegInstance = ffmpeg || await loadFFmpeg();
       
       // Write the file to FFmpeg's virtual file system
       const data = await readFileAsArrayBuffer(videoFile);
-      await ffmpeg.writeFile('input.mp4', new Uint8Array(data));
+      await ffmpegInstance.deleteFile('input.mp4').catch(() => {});
+      await ffmpegInstance.deleteFile('output.mp3').catch(() => {});
+      await ffmpegInstance.writeFile('input.mp4', new Uint8Array(data));
       
       // Run the FFmpeg command to extract audio
-      await ffmpeg.exec([
+      const exitCode = await ffmpegInstance.exec([
         '-i', 'input.mp4',
         '-q:a', '0',
         '-map', 'a',
         'output.mp3'
       ]);
+      if (exitCode !== 0) throw new Error('FFmpeg could not extract an audio track.');
       
       // Read the result
-      const outputData = await ffmpeg.readFile('output.mp3');
+      const outputData = await ffmpegInstance.readFile('output.mp3');
       
       // Create a URL for the output file
       const blob = new Blob([outputData], { type: 'audio/mpeg' });
@@ -73,7 +103,7 @@ export default function AudioExtractor() {
       
       setAudioUrl(url);
     } catch (err) {
-      setError('Failed to extract audio. The video might not contain an audio track or is corrupted.');
+      setError(err?.message || 'Failed to extract audio. The video may be corrupted or have no audio.');
       console.error('Audio extraction error:', err);
     } finally {
       setLoading(false);
@@ -83,18 +113,22 @@ export default function AudioExtractor() {
   const readFileAsArrayBuffer = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
+      reader.onload = () => {
+        if (reader.result instanceof ArrayBuffer) resolve(reader.result);
+        else reject(new Error('Could not read the selected video file.'));
+      };
+      reader.onerror = () => reject(new Error('Could not read the selected video file.'));
+      reader.onabort = () => reject(new Error('Reading the video file was cancelled.'));
       reader.readAsArrayBuffer(file);
     });
   };
 
   return (
     <div className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-md">
-      <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">
+      {/* <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">
         Audio Extractor from Video
-      </h1>
-      
+      </h1> */}
+      {/* hello world */}
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -106,6 +140,7 @@ export default function AudioExtractor() {
             onChange={(e) => {
               setVideoFile(e.target.files?.[0] || null);
               setAudioUrl('');
+              setError('');
             }}
             className="block w-full text-sm text-gray-500
               file:mr-4 file:py-2 file:px-4
@@ -121,12 +156,12 @@ export default function AudioExtractor() {
 
         <button
           onClick={extractAudio}
-          disabled={!videoFile || !ffmpeg || loading}
+          disabled={!videoFile || loading || loadingTools}
           className="w-full px-4 py-2 bg-blue-600 text-white rounded-md
             hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500
             disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {loading ? `Processing... ${progress}%` : 'Extract Audio'}
+          {loadingTools ? 'Loading audio tools...' : loading ? `Processing... ${progress}%` : 'Extract Audio'}
         </button>
 
         {error && (

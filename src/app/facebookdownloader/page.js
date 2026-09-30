@@ -1,4 +1,18 @@
 import Facebook from "../components/SearchForm";
+import Link from "next/link";
+
+export const metadata = {
+  title: "Facebook Video Downloader for Public Videos",
+  description: "Open available SD or HD streams from public Facebook video links. Video quality and availability depend on the original post.",
+  keywords: ["Facebook video downloader", "download public Facebook video", "Facebook video HD downloader"],
+  alternates: { canonical: "/facebookdownloader" },
+  openGraph: {
+    title: "Facebook Video Downloader",
+    description: "Find available SD or HD streams for a public Facebook video link.",
+    url: "/facebookdownloader",
+    type: "website",
+  },
+};
 
 export default function HomePage() {
   return (
@@ -6,15 +20,19 @@ export default function HomePage() {
        <section className="bg-gradient-to-r from-blue-600 to-blue-500 text-white py-16 px-4">
         <div className="max-w-4xl mx-auto text-center">
           <h1 className="text-2xl md:text-5xl font-bold mb-4 animate-fade-in">
-          🚀 Fastest Facebook Video Downloader
+          Facebook Video Downloader
           </h1>
           <p className="text-lg md:text-xl mb-8 max-w-2xl mx-auto animate-fade-in animation-delay-300">
-            Get your favorite videos in HD, 4K, or any quality without any software installation
+            Paste a public Facebook video link to check whether an SD or HD stream is available.
           </p>
           {/* Downloader Component */}
           <div className="animate-fade-in animation-delay-450">
             <Facebook />
           </div>
+          <nav aria-label="Related tools" className="mt-6 flex justify-center gap-6 text-sm">
+            <Link href="/" className="underline underline-offset-4">YouTube video downloader</Link>
+            <Link href="/audio" className="underline underline-offset-4">Video to MP3 audio extractor</Link>
+          </nav>
         </div>
       </section>
 
@@ -89,8 +107,7 @@ export default function HomePage() {
               <details className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors" open>
                 <summary className="font-bold text-lg cursor-pointer">Is it legal to download Facebook videos?</summary>
                 <p className="mt-2 text-gray-700">
-                  Downloading videos for personal use is generally acceptable, but you should respect copyright laws. 
-                  Don&apos;t redistribute downloaded videos without permission, especially if they contain copyrighted material.
+                  Only download videos you own or have permission to use, and follow Facebook&apos;s terms and applicable copyright law.
                 </p>
               </details>
               <details className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors">
@@ -117,7 +134,7 @@ export default function HomePage() {
                 <h3 className="font-bold text-lg mb-3 flex items-center">
                   <span className="text-blue-500 mr-2">⚡</span> Fast Downloads
                 </h3>
-                <p>Our servers are optimized for quick video processing and fast download speeds.</p>
+                <p>Available streams open directly from their source; speed depends on the source and your connection.</p>
               </div>
               <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
                 <h3 className="font-bold text-lg mb-3 flex items-center">

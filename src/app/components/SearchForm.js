@@ -1,6 +1,7 @@
 'use client';
 import Image from 'next/image';
 import { useState } from 'react';
+import { parseApiResponse } from '../../lib/api';
 
 export default function Home() {
   const [url, setUrl] = useState('');
@@ -10,7 +11,7 @@ export default function Home() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!url) {
+    if (!url.trim()) {
       setError('Please enter a Facebook video URL');
       return;
     }
@@ -25,18 +26,17 @@ export default function Home() {
         body: JSON.stringify({ url }),
       });
 
-      const data = await res.json();
+      const data = await parseApiResponse(res, 'Facebook request failed.');
 
-      if (data.success) {
-        setVideoInfo(data.data);
-      } else {
-        setError(data.message || 'Something went wrong');
+      if (!data.success || (!data.data?.hd && !data.data?.sd)) {
+        throw new Error(data.message || 'No downloadable Facebook video was found.');
       }
+      setVideoInfo(data.data);
     } catch (err) {
-      setError('Server error');
+      setError(err?.message || 'Could not fetch this Facebook video. Please try again.');
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
@@ -77,26 +77,28 @@ export default function Home() {
       {videoInfo && (
         <div className="bg-white rounded-xl shadow-md overflow-hidden">
           <div className="md:flex">
+            {videoInfo.thumbnail && (
             <div className="md:flex-shrink-0">
               <Image
                 src={videoInfo.thumbnail}
-                alt="thumbnail youtube video"
+                alt="Facebook video thumbnail"
                 width={500}
                 height={300}
               />
             </div>
+            )}
             <div className="p-8">
               <h3 className="text-xl font-semibold text-gray-800 mb-2">
                 {videoInfo.title}
               </h3>
               <div className="flex flex-col sm:flex-row gap-4 mt-6">
                 <a
-                  href={videoInfo.sd}
+                  href={videoInfo.hd || videoInfo.sd}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-center"
                 >
-                  Download HD Quality
+                  {videoInfo.hd ? 'Download HD Quality' : 'Download SD Quality'}
                 </a>
 
               </div>
