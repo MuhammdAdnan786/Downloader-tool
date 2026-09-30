@@ -3,6 +3,7 @@ import { parseJsonBody, publicMediaError } from "../../../lib/api";
 import { detectPlatform, fetchMediaInfo, normalizeUrl } from "../../../lib/media";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(request) {
@@ -25,7 +26,10 @@ export async function POST(request) {
 
     const info = await fetchMediaInfo(url);
     if (!info.formats?.length) {
-      return NextResponse.json({ error: "No downloadable formats were found for this video." }, { status: 422 });
+      return NextResponse.json(
+        { error: "No downloadable formats were found for this video." },
+        { status: 422 }
+      );
     }
     return NextResponse.json(info);
   } catch (error) {

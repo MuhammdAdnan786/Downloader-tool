@@ -6,9 +6,27 @@ import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
 
-const INFO_TTL = 5 * 60 * 1000; // stream URLs kaafi der valid rehte hain
-const YTDL_TIMEOUT = 12000;
-const YTDL_COOLDOWN = 10000;
+/* ---------------- config ---------------- */
+
+const IS_SERVERLESS = Boolean(
+  process.env.NETLIFY ||
+    process.env.VERCEL ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT
+);
+
+const INFO_TTL = 5 * 60 * 1000;
+const YTDL_TIMEOUT = IS_SERVERLESS ? 5500 : 12000; // Netlify 10 sec se kam
+const YTDL_COOLDOWN = 30 * 1000;
+const COBALT_TIMEOUT = IS_SERVERLESS ? 3500 : 10000;
+const YTDLP_TIMEOUT = 15000;
+
+const PROXY_URL = process.env.YT_PROXY_URL; // http://user:pass@host:port
+const COOKIES = process.env.YT_COOKIES; // JSON array (ytdl cookies)
+const COBALT_API_URL = process.env.COBALT_API_URL; // apna cobalt instance
+const COBALT_API_KEY = process.env.COBALT_API_KEY; // optional
+const COBALT_ENABLED = Boolean(COBALT_API_URL);
+const CAN_USE_YTDLP = !IS_SERVERLESS; // Netlify/Vercel par yt-dlp nahi hota
 
 /* ---------------- helpers ---------------- */
 
@@ -93,29 +111,17 @@ async function cached(key, ttl, loader) {
   return promise;
 }
 
-/* ---------------- yt-dlp ---------------- */
+/* ---------------- yt-dlp (sirf VPS/Docker/local par) ---------------- */
 
 let binaryPromise = null;
 
 async function findYtDlpBinary() {
+  const isWin = process.platform === "win32";
   const candidates = [
     "yt-dlp",
-    path.join(
-      process.cwd(),
-      "node_modules",
-      "youtube-dl-exec",
-      "bin",
-      process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"
-    ),
-    ...(process.platform === "win32"
-      ? [
-          path.join(process.cwd(), "public", "bin", "yt-dlp.exe"),
-          path.join(process.cwd(), "bin", "yt-dlp.exe"),
-        ]
-      : [
-          path.join(process.cwd(), "public", "bin", "yt-dlp"),
-          path.join(process.cwd(), "bin", "yt-dlp"),
-        ]),
+    path.join(process.cwd(), "node_modules", "youtube-dl-exec", "bin", isWin ? "yt-dlp.exe" : "yt-dlp"),
+    path.join(process.cwd(), "public", "bin", isWin ? "yt-dlp.exe" : "yt-dlp"),
+    path.join(process.cwd(), "bin", isWin ? "yt-dlp.exe" : "yt-dlp"),
   ];
 
   for (const candidate of candidates) {
@@ -133,11 +139,10 @@ async function findYtDlpBinary() {
   return null;
 }
 
-// Binary path ek baar dhoondh kar cache hota hai (har request pe process spawn nahi hota)
 export async function resolveYtDlpBinary() {
   if (!binaryPromise) {
     binaryPromise = findYtDlpBinary().then((binary) => {
-      if (!binary) binaryPromise = null; // na mile to agli baar dobara try
+      if (!binary) binaryPromise = null;
       return binary;
     });
   }
@@ -158,7 +163,7 @@ async function runYtDlp(attempts) {
     try {
       return await execFileAsync(binary, args, {
         maxBuffer: 25 * 1024 * 1024,
-        timeout: 12000,
+        timeout: YTDLP_TIMEOUT,
       });
     } catch (error) {
       lastError = error;
@@ -175,11 +180,12 @@ const BASE_FLAGS = [
   "--no-playlist",
   "--socket-timeout", "10",
   "--extractor-retries", "1",
+  ...(PROXY_URL ? ["--proxy", PROXY_URL] : []),
 ];
 
 function jsonAttempts(url, platform) {
   const plain = [...BASE_FLAGS, "--dump-json", url];
-  if (platform !== "youtube") return [plain]; // Facebook pe YouTube clients ka koi faida nahi
+  if (platform !== "youtube") return [plain];
 
   const withClient = (client) => [
     ...BASE_FLAGS,
@@ -190,7 +196,6 @@ function jsonAttempts(url, platform) {
   return [withClient("android,web,default"), withClient("tv_embedded"), plain];
 }
 
-// yt-dlp ka JSON ek baar nikalo, phir info / download / audio sab isi se
 function getYtDlpData(url) {
   return cached(`ytdlp:${url}`, INFO_TTL, async () => {
     const { stdout } = await runYtDlp(jsonAttempts(url, detectPlatform(url)));
@@ -201,14 +206,35 @@ function getYtDlpData(url) {
 /* ---------------- ytdl-core ---------------- */
 
 let ytdlSkipUntil = 0;
+let ytAgent;
+
+function getAgent() {
+  if (ytAgent !== undefined) return ytAgent;
+  try {
+    const cookies = COOKIES ? JSON.parse(COOKIES) : undefined;
+    if (PROXY_URL) ytAgent = ytdl.createProxyAgent({ uri: PROXY_URL }, cookies);
+    else if (cookies) ytAgent = ytdl.createAgent(cookies);
+    else ytAgent = null;
+  } catch {
+    ytAgent = null;
+  }
+  return ytAgent;
+}
 
 function getYtdlInfo(url) {
   return cached(`ytdl:${url}`, INFO_TTL, () =>
-    withTimeout(ytdl.getInfo(url, { playerClients: ["ANDROID"] }), YTDL_TIMEOUT, "ytdl")
+    withTimeout(
+      ytdl.getInfo(url, {
+        agent: getAgent() || undefined,
+        playerClients: ["ANDROID", "IOS"],
+      }),
+      YTDL_TIMEOUT,
+      "ytdl"
+    )
   );
 }
 
-// ytdl toot jaye to 60 sec tak skip karo taake har request 8 sec na latke
+// ytdl fail ho to kuch der skip karo taake har request na latke
 async function tryYtdlInfo(url) {
   if (Date.now() < ytdlSkipUntil) return null;
   try {
@@ -217,6 +243,97 @@ async function tryYtdlInfo(url) {
     ytdlSkipUntil = Date.now() + YTDL_COOLDOWN;
     return null;
   }
+}
+
+/* ---------------- cobalt fallback + oEmbed ---------------- */
+
+async function fetchOEmbed(url) {
+  const res = await fetch(
+    `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`,
+    { signal: AbortSignal.timeout(4000) }
+  );
+  if (!res.ok) throw new Error("oembed failed");
+  return res.json(); // { title, author_name, thumbnail_url }
+}
+
+function cobaltRequest(url, mode) {
+  return cached(`cobalt:${mode}:${url}`, 2 * 60 * 1000, async () => {
+    if (!COBALT_ENABLED) throw new Error("No fallback downloader is configured.");
+
+    const headers = { Accept: "application/json", "Content-Type": "application/json" };
+    if (COBALT_API_KEY) headers.Authorization = `Api-Key ${COBALT_API_KEY}`;
+
+    const res = await withTimeout(
+      fetch(COBALT_API_URL, {
+        method: "POST",
+        headers,
+        signal: AbortSignal.timeout(COBALT_TIMEOUT),
+        body: JSON.stringify({
+          url,
+          downloadMode: mode, // "auto" (video) ya "audio"
+          videoQuality: "720",
+          audioFormat: "mp3",
+          filenameStyle: "basic",
+        }),
+      }),
+      COBALT_TIMEOUT,
+      "cobalt"
+    );
+
+    const data = await res.json().catch(() => null);
+    if (!data) throw new Error("Fallback downloader returned an invalid response.");
+
+    if ((data.status === "tunnel" || data.status === "redirect") && data.url) {
+      return { url: data.url, filename: data.filename || "" };
+    }
+    if (data.status === "picker" && Array.isArray(data.picker)) {
+      const item = data.picker.find((p) => p.type === "video") || data.picker[0];
+      if (item?.url) return { url: item.url, filename: "" };
+    }
+    throw new Error(data?.error?.code || "Fallback downloader could not process this link.");
+  });
+}
+
+function buildFallbackInfo(platform, url, meta) {
+  const formats = [
+    {
+      format_id: "cobalt_video",
+      url: null,
+      ext: "mp4",
+      resolution: "720p",
+      fps: null,
+      filesize: null,
+      vcodec: "h264",
+      acodec: "aac",
+      progressive: true,
+      quality: "720p",
+      tbr: null,
+    },
+    {
+      format_id: "cobalt_audio",
+      url: null,
+      ext: "mp3",
+      resolution: "audio",
+      fps: null,
+      filesize: null,
+      vcodec: "none",
+      acodec: "mp3",
+      progressive: false,
+      quality: "audio",
+      tbr: null,
+    },
+  ];
+
+  return {
+    platform,
+    title: meta?.title || (platform === "youtube" ? "YouTube video" : "Video"),
+    thumbnail: meta?.thumbnail_url || "",
+    duration: 0,
+    uploader: meta?.author_name || "",
+    formats,
+    bestFormat: formats[0],
+    sourceUrl: url,
+  };
 }
 
 /* ---------------- format mapping ---------------- */
@@ -317,16 +434,44 @@ export async function fetchMediaInfo(url) {
   return cached(`info:${url}`, INFO_TTL, async () => {
     const platform = detectPlatform(url);
 
+    // oEmbed ytdl ke saath parallel chalta hai, taake waqt zaya na ho
+    const oembedPromise =
+      COBALT_ENABLED && platform === "youtube"
+        ? fetchOEmbed(url).catch(() => null)
+        : Promise.resolve(null);
+
     if (platform === "youtube") {
       const info = await tryYtdlInfo(url);
       if (info) return fromYtdl(platform, url, info);
     }
 
-    return fromYtDlp(platform, url, await getYtDlpData(url));
+    let lastError = null;
+    if (CAN_USE_YTDLP) {
+      try {
+        return fromYtDlp(platform, url, await getYtDlpData(url));
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (COBALT_ENABLED) {
+      return buildFallbackInfo(platform, url, await oembedPromise);
+    }
+
+    throw (
+      lastError ||
+      new Error(
+        "The video platform blocked or timed out on this server. Set YT_PROXY_URL or COBALT_API_URL."
+      )
+    );
   });
 }
 
 export async function getDirectDownloadUrl(url, formatId) {
+  // fallback formats seedha cobalt se
+  if (formatId === "cobalt_video") return (await cobaltRequest(url, "auto")).url;
+  if (formatId === "cobalt_audio") return (await cobaltRequest(url, "audio")).url;
+
   if (detectPlatform(url) === "youtube") {
     const info = await tryYtdlInfo(url);
     if (info) {
@@ -345,19 +490,26 @@ export async function getDirectDownloadUrl(url, formatId) {
     }
   }
 
-  const data = await getYtDlpData(url);
-  const list = (data.formats || []).filter((f) => f?.url);
-  const selected =
-    list.find((f) => String(f.format_id) === String(formatId)) ||
-    list
-      .filter((f) => f.vcodec && f.vcodec !== "none" && f.acodec && f.acodec !== "none")
-      .sort((a, b) => (b.height || 0) - (a.height || 0))[0] ||
-    list[list.length - 1];
-
-  if (!selected?.url) {
-    throw new Error("No direct download URL was generated for the selected format.");
+  let lastError = null;
+  if (CAN_USE_YTDLP) {
+    try {
+      const data = await getYtDlpData(url);
+      const list = (data.formats || []).filter((f) => f?.url);
+      const selected =
+        list.find((f) => String(f.format_id) === String(formatId)) ||
+        list
+          .filter((f) => f.vcodec && f.vcodec !== "none" && f.acodec && f.acodec !== "none")
+          .sort((a, b) => (b.height || 0) - (a.height || 0))[0] ||
+        list[list.length - 1];
+      if (selected?.url) return selected.url;
+    } catch (error) {
+      lastError = error;
+    }
   }
-  return selected.url;
+
+  if (COBALT_ENABLED) return (await cobaltRequest(url, "auto")).url;
+
+  throw lastError || new Error("No direct download URL was generated for the selected format.");
 }
 
 export async function getBestAudio(url) {
@@ -374,23 +526,35 @@ export async function getBestAudio(url) {
           return { url: format.url, ext: container === "mp4" ? "m4a" : container };
         }
       } catch {
-        // yt-dlp fallback neeche
+        // aage fallback
       }
     }
   }
 
-  const data = await getYtDlpData(url);
-  const audio = (data.formats || [])
-    .filter((f) => f?.url && f.vcodec === "none" && f.acodec && f.acodec !== "none")
-    .sort((a, b) => {
-      const aM4a = a.ext === "m4a" ? 1 : 0;
-      const bM4a = b.ext === "m4a" ? 1 : 0;
-      if (aM4a !== bM4a) return bM4a - aM4a;
-      return (b.abr || b.tbr || 0) - (a.abr || a.tbr || 0);
-    })[0];
+  let lastError = null;
+  if (CAN_USE_YTDLP) {
+    try {
+      const data = await getYtDlpData(url);
+      const audio = (data.formats || [])
+        .filter((f) => f?.url && f.vcodec === "none" && f.acodec && f.acodec !== "none")
+        .sort((a, b) => {
+          const aM4a = a.ext === "m4a" ? 1 : 0;
+          const bM4a = b.ext === "m4a" ? 1 : 0;
+          if (aM4a !== bM4a) return bM4a - aM4a;
+          return (b.abr || b.tbr || 0) - (a.abr || a.tbr || 0);
+        })[0];
+      if (audio) return { url: audio.url, ext: audio.ext || "m4a" };
+    } catch (error) {
+      lastError = error;
+    }
+  }
 
-  if (!audio) throw new Error("No audio stream was found for this URL.");
-  return { url: audio.url, ext: audio.ext || "m4a" };
+  if (COBALT_ENABLED) {
+    const result = await cobaltRequest(url, "audio");
+    return { url: result.url, ext: "mp3" };
+  }
+
+  throw lastError || new Error("No audio stream was found for this URL.");
 }
 
 export async function getBestAudioUrl(url) {
