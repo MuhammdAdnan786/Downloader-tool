@@ -1,6 +1,8 @@
 import ytdl from "@distube/ytdl-core";
 import { execFile } from "child_process";
 import { createRequire } from "module";
+import { mkdtemp, writeFile } from "fs/promises";
+import { tmpdir } from "os";
 import path from "path";
 import { promisify } from "util";
 
@@ -97,6 +99,36 @@ async function cached(key, ttl, loader) {
 /* ---------------- yt-dlp ---------------- */
 
 let binaryPromise = null;
+let cookieArgsPromise = null;
+
+function getYtDlpCookieArgs() {
+  const encodedCookies = process.env.YOUTUBE_COOKIES_BASE64?.replace(/\s/g, "");
+  if (!encodedCookies) return Promise.resolve([]);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encodedCookies)) {
+    return Promise.reject(new Error("YOUTUBE_COOKIES_BASE64 must be base64-encoded."));
+  }
+
+  if (!cookieArgsPromise) {
+    cookieArgsPromise = (async () => {
+      const cookieText = Buffer.from(encodedCookies, "base64").toString("utf8");
+      const hasNetscapeHeader = /^#(?: Netscape)? HTTP Cookie File/m.test(cookieText);
+      const hasCookieEntries = cookieText.split(/\r?\n/).some((line) => line && !line.startsWith("#"));
+      if (!hasNetscapeHeader || !hasCookieEntries) {
+        throw new Error("YOUTUBE_COOKIES_BASE64 must decode to a Netscape-format YouTube cookies file.");
+      }
+
+      const directory = await mkdtemp(path.join(tmpdir(), "yt-dlp-cookies-"));
+      const cookiePath = path.join(directory, "cookies.txt");
+      await writeFile(cookiePath, cookieText, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      return ["--cookies", cookiePath];
+    })().catch((error) => {
+      cookieArgsPromise = null;
+      throw error;
+    });
+  }
+
+  return cookieArgsPromise;
+}
 
 async function findYtDlpBinary() {
   let packageBinary = null;
@@ -198,12 +230,14 @@ const BASE_FLAGS = [
   "--extractor-retries", "1",
 ];
 
-function jsonAttempts(url, platform) {
-  const plain = [...BASE_FLAGS, "--dump-json", url];
+async function jsonAttempts(url, platform) {
+  const cookieArgs = platform === "youtube" ? await getYtDlpCookieArgs() : [];
+  const flags = [...BASE_FLAGS, ...cookieArgs];
+  const plain = [...flags, "--dump-json", url];
   if (platform !== "youtube") return [plain]; // Facebook pe YouTube clients ka koi faida nahi
 
   const withClient = (client) => [
-    ...BASE_FLAGS,
+    ...flags,
     "--extractor-args", `youtube:player_client=${client}`,
     "--dump-json",
     url,
@@ -214,7 +248,7 @@ function jsonAttempts(url, platform) {
 // yt-dlp ka JSON ek baar nikalo, phir info / download / audio sab isi se
 function getYtDlpData(url) {
   return cached(`ytdlp:${url}`, INFO_TTL, async () => {
-    const { stdout } = await runYtDlp(jsonAttempts(url, detectPlatform(url)));
+    const { stdout } = await runYtDlp(await jsonAttempts(url, detectPlatform(url)));
     return JSON.parse(stdout);
   });
 }
