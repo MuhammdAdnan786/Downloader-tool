@@ -36,21 +36,26 @@ export async function POST(request) {
     const message = String(error?.message || "");
     const reason = error?.code === 127 || error?.code === "ENOENT" || error?.code === "EACCES"
       ? "extractor-process-failed"
+      : /yt-dlp is not installed|not available on this server/i.test(message)
+        ? "extractor-missing"
       : /timed out|timeout/i.test(message)
         ? "timeout"
         : /429|rate.?limit/i.test(message)
         ? "rate-limited"
         : /private|login required|unavailable/i.test(message)
           ? "restricted-or-unavailable"
-          : /yt-dlp is not installed|not available on this server/i.test(message)
-            ? "extractor-missing"
-            : /network|socket|fetch failed|econn/i.test(message)
-              ? "network-error"
-              : "extractor-error";
+          : /network|socket|fetch failed|econn/i.test(message)
+            ? "network-error"
+            : "extractor-error";
+
+    const safeMessage = message
+      .replace(/https?:\/\/[^\s"'<>]+/gi, "[redacted-url]")
+      .slice(0, 300);
 
     console.error("Media info upstream failure", {
       platform,
       reason,
+      message: safeMessage,
       errorName: error?.name || "Error",
       errorCode: error?.code || null,
       durationMs: Date.now() - startedAt,
